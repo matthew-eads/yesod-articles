@@ -17,6 +17,8 @@ import Text.Regex
 import Data.List (sortBy)
 import Yesod.Core.Widget
 import Instances.TH.Lift
+import Text.Blaze.Html (toHtml)
+import Yesod.Core.Handler (getMessageRender, getUrlRenderParams)
 
 {-
  - A word on naming conventions and directories:
@@ -161,13 +163,13 @@ makeGet prefix article_name =
         fname = mkName $ concat ["get", article_name', "R"]
     in 
       do {
-        widget <- whamletFile $ concat ["articles/", article_name', ".hamlet"];
-        dl <- [e|defaultLayout|];
+        widget <- whamletFile $ concat ["templates/articles/", article_name', ".hamlet"];
+        --dl <- [e|defaultLayout|];
         title <- runIO $ getTitle (concat ["templates/articles/", article_name', ".hamlet"]);
-        set_title <- [e| setTitle (prefix' ++ " " ++ (unpack title)) |];
+        set_title <- [e| setTitle $ toHtml (prefix' ++ " " ++ (unpack title)) |];
         --decs <- makeGet rest;
         return (ValD (VarP fname) 
-            (NormalB (AppE dl  (ParensE
+            (NormalB (AppE (VarE (mkName "defaultLayout"))  (ParensE
                       (DoE [NoBindS set_title,
                             NoBindS widget])))) []);
       }
@@ -197,10 +199,10 @@ makeGetArticle articles  =
                                           (NormalB (VarE $ mkName $ concat ["get", unpack article, "R"]))[]) articles
     in
     do {
-      notfound <- [e|notFound|];
+      --notfound <- [e|notFound|];
       return [FunD fname [Clause [VarP arg]
                (NormalB (CaseE (VarE arg)
-               (article_cases ++ [Match WildP (NormalB notfound) []])))[]]] 
+               (article_cases ++ [Match WildP (NormalB (VarE $ mkName "notFound")) []])))[]]] 
                         
     }
 
