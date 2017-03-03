@@ -1,16 +1,14 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE OverloadedStrings #-}
 module Yesod.Articles where
---import Import
+import Prelude
 import Language.Haskell.TH
 import System.Directory
 import Text.Hamlet as NP
---import qualified Data.Text.Lazy as TL
-import qualified Data.Text as T --(splitOn, length, intercalate, isSuffixOf, pack, append) --as DT (splitOn, length, intercalate) 
+import qualified Data.Text as T 
 import Data.Text (Text, pack, splitOn, intercalate, isSuffixOf, unpack)
 import qualified Data.Text.IO as TI
 import Data.Dates (DateTime, parseDate, getCurrentDateTime)
-import Prelude -- (last, head, lines) 
 import Language.Haskell.TH.Quote (QuasiQuoter (..))
 import Language.Haskell.TH.Syntax
 import Text.Regex
@@ -18,16 +16,7 @@ import Data.List (sortBy)
 import Yesod.Core.Widget
 import Instances.TH.Lift
 import Text.Blaze.Html (toHtml)
-import Yesod.Core.Handler (getMessageRender, getUrlRenderParams)
-
-{-
- - A word on naming conventions and directories:
- - All articles should live in templates/articles
- - The name of the file will be the id for the post
- - as well as the route name. If no title is given 
- - in the file, the filename serves for the page title
- - as well. Please don't put spaces in your filename.
- -}
+import Yesod.Core.Handler (getMessageRender, getUrlRenderParams, notFound)
 
 -- | Snatched from Yesod.Core.Widget, used in other functions
 rules :: Q NP.HamletRules
@@ -155,34 +144,37 @@ makePreviews =
 -- defaultLayout $ do {
 --   $(setTitle prefix ++ article_name)
 --   $(widgetFile articles/article_name)}
-makeGet :: Text -> Text -> Q Dec
---makeGet [] _ = return []
-makeGet prefix article_name = 
+makeGet :: Q Exp -> Text -> Text -> Q Dec
+makeGet f prefix article_name = 
     let article_name' = unpack article_name
         prefix' = unpack prefix
         fname = mkName $ concat ["get", article_name', "R"]
     in 
       do {
+        dl <- f;
         widget <- whamletFile $ concat ["templates/articles/", article_name', ".hamlet"];
         --dl <- [e|defaultLayout|];
         title <- runIO $ getTitle (concat ["templates/articles/", article_name', ".hamlet"]);
         set_title <- [e| setTitle $ toHtml (prefix' ++ " " ++ (unpack title)) |];
         --decs <- makeGet rest;
         return (ValD (VarP fname) 
-            (NormalB (AppE (VarE (mkName "defaultLayout"))  (ParensE
+            (NormalB (AppE dl {-(VarE (mkName "defaultLayout"))-}  (ParensE
                       (DoE [NoBindS set_title,
                             NoBindS widget])))) []);
       }
 
+makeGets :: Q [Dec]
+makeGets = makeGetsWithOptions "" (VarE (mkName "defaultLayout")) -- maybe change this
+
 -- | Gets the list of articles in templates/articles, makes all
 -- the 'getter' functions for the articles (see makeGet), and creates
 -- the 'getArticleR' function (see makeGetArticle).
-makeGets :: Text -> Q [Dec]
-makeGets prefix =
+makeGets :: Text -> Q Exp -> Q [Dec]
+makeGets prefix f =
     do
       articles <- runIO getArticleNames
       let articles' = map stripName articles
-      decs <- mapM (makeGet prefix) articles'
+      decs <- mapM (makeGet f prefix) articles'
       getArticle <- makeGetArticle articles'
       return (decs ++ getArticle)
 
@@ -199,10 +191,10 @@ makeGetArticle articles  =
                                           (NormalB (VarE $ mkName $ concat ["get", unpack article, "R"]))[]) articles
     in
     do {
-      --notfound <- [e|notFound|];
+      notfound <- [e|notFound|];
       return [FunD fname [Clause [VarP arg]
                (NormalB (CaseE (VarE arg)
-               (article_cases ++ [Match WildP (NormalB (VarE $ mkName "notFound")) []])))[]]] 
+               (article_cases ++ [Match WildP (NormalB notfound) []])))[]]] 
                         
     }
 
