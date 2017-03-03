@@ -1,0 +1,8 @@
+flags: {}
+extra-package-dbs: []
+packages:
+- '.'
+extra-deps:
+- dates-0.2.2.1
+- directory-1.2.7.1
+resolver: lts-8.3
