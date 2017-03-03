@@ -67,6 +67,7 @@ library
                  , directory                     >= 1.1        && < 1.3
                  , th-lift-instances
                  , blaze-html
+                 , filepath
 
 source-repository       head
   type:                 git

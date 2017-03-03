@@ -17,6 +17,7 @@ import Yesod.Core.Widget
 import Instances.TH.Lift
 import Text.Blaze.Html (toHtml)
 import Yesod.Core.Handler (getMessageRender, getUrlRenderParams, notFound)
+import System.FilePath.Posix
 
 -- | Snatched from Yesod.Core.Widget, used in other functions
 rules :: Q NP.HamletRules
@@ -69,12 +70,12 @@ getDates (x:xs) =
 -- Returns the articles as a list of strings, sorted by date, newest->oldest,
 -- based on the dates from getDate(s). 
 -- File names returned are of the form "templates/articles/foo.hamlet"
-getArticleNames :: IO [Text]
-getArticleNames = 
+getArticleNames :: Text -> IO [Text]
+getArticleNames path = 
     do {
-      files <- getDirectoryContents "templates/articles/";
+      files <- getDirectoryContents $ unpack path;
       let hamlet_files = filter (isSuffixOf ".hamlet") (map pack files)
-          file_names_2 = map (\fname -> T.append "templates/articles/" fname) hamlet_files
+          file_names_2 = map (\fname -> pack $ joinPath [unpack path, unpack fname]) hamlet_files
       in do {
            dates <- getDates file_names_2;
            return (map fst $ sortBy (\(x,y) -> \(x', y') -> compare y' y) $ zip file_names_2 dates);
@@ -84,12 +85,7 @@ getArticleNames =
 -- | Takes a file path (templates/articles/foo.hamlet), and returns
 -- a string of just the file name without the extension (foo).
 stripName :: Text -> Text
-stripName file_name =
-    let n = T.length $ pack "templates/articles/"
-        m = T.length $ pack ".hamlet"
-        article' = T.drop n file_name
-        article = T.take (T.length article' - m) article'
-    in article
+stripName file_name = pack $ takeBaseName $ unpack file_name
 
 -- | Takes a file path (templates/articles/foo.hamlet), and returns
 -- a route name for it (fooR). Undefined behaviour if file names not fetched from
@@ -124,13 +120,16 @@ getPreview qhr set fp = do
     hamletFromString qhr set $ unpack $ intercalate "\n" [contents_link, preview, read_more]
 
 
+makePreviews :: Q Exp
+makePreviews = makePreviewsWithOptions "templates/articles"
+
 -- | This can be used to make the previews for all the articles
 -- It fetches the articles to display, and for each one calls our modified
 -- hamletFileWithSettings (getPreview) 
-makePreviews :: Q Exp
-makePreviews = 
+makePreviewsWithOptions :: Text -> Q Exp
+makePreviewsWithOptions path = 
     do 
-      articles <- runIO getArticleNames
+      articles <- runIO $ getArticleNames  path
       xs <- mapM (\x -> getPreview rules NP.defaultHamletSettings $ unpack x) articles
       return $ DoE (map NoBindS xs)
           
@@ -144,17 +143,17 @@ makePreviews =
 -- defaultLayout $ do {
 --   $(setTitle prefix ++ article_name)
 --   $(widgetFile articles/article_name)}
-makeGet :: Q Exp -> Text -> Text -> Q Dec
-makeGet f prefix article_name = 
+makeGet :: Text -> Text -> Q Exp -> Text -> Q Dec
+makeGet prefix path exp article_name = 
     let article_name' = unpack article_name
         prefix' = unpack prefix
         fname = mkName $ concat ["get", article_name', "R"]
     in 
       do {
-        dl <- f;
-        widget <- whamletFile $ concat ["templates/articles/", article_name', ".hamlet"];
+        dl <- exp;
+        widget <- whamletFile $ joinPath [unpack path, addExtension article_name' ".hamlet"];
         --dl <- [e|defaultLayout|];
-        title <- runIO $ getTitle (concat ["templates/articles/", article_name', ".hamlet"]);
+        title <- runIO $ getTitle (pack $ joinPath [unpack path, addExtension article_name' ".hamlet"]);
         set_title <- [e| setTitle $ toHtml (prefix' ++ " " ++ (unpack title)) |];
         --decs <- makeGet rest;
         return (ValD (VarP fname) 
@@ -163,18 +162,25 @@ makeGet f prefix article_name =
                             NoBindS widget])))) []);
       }
 
+
 makeGets :: Q [Dec]
-makeGets = makeGetsWithOptions "" (VarE (mkName "defaultLayout")) -- maybe change this
+makeGets = makeGetsWithOptions "" "templates/articles/" (return (VarE (mkName "defaultLayout"))) -- maybe change this
+
+--                     arg         example
+-- makeGetsWithOptions prefix      "Matt Eads:"
+--                     path        "templates/articles/" -- make sure we add a / to the end if needed
+--                     exp         [e|\x -> do defaultLayout $ x|] -- not sure what the default should be here
+--                     
 
 -- | Gets the list of articles in templates/articles, makes all
 -- the 'getter' functions for the articles (see makeGet), and creates
 -- the 'getArticleR' function (see makeGetArticle).
-makeGets :: Text -> Q Exp -> Q [Dec]
-makeGets prefix f =
+makeGetsWithOptions :: Text -> Text -> Q Exp -> Q [Dec]
+makeGetsWithOptions prefix path exp =
     do
-      articles <- runIO getArticleNames
+      articles <- runIO $ getArticleNames path
       let articles' = map stripName articles
-      decs <- mapM (makeGet f prefix) articles'
+      decs <- mapM (makeGet prefix path exp) articles'
       getArticle <- makeGetArticle articles'
       return (decs ++ getArticle)
 
@@ -212,10 +218,10 @@ getHeader contents =
 -- any other text, other than the date comment. The date and title can
 -- be put in either order. If no title can be found, the stripped file
 -- path is used.
-getTitle :: String -> IO Text
+getTitle :: Text -> IO Text
 getTitle fp = 
     do
-      contents <- TI.readFile fp
+      contents <- TI.readFile $ unpack fp
       return $ 
              let header = getHeader contents
                  rgx = mkRegexWithOpts "<!--[[:digit:]]{4}.[[:digit:]]{2}.[[:digit:]]{2}-->" False True 
@@ -225,18 +231,21 @@ getTitle fp =
                  rgx2 = mkRegexWithOpts "<!--(.*)-->" False True 
              in case matchRegex rgx2 non_match of
                   (Just matches) -> pack $ head matches
-                  Nothing -> stripName $ pack fp
+                  Nothing -> stripName fp
 
 
 makeContentsEntry :: (Text, Text) -> Text
 makeContentsEntry (id, title) = T.concat ["<li><a href=\"#", id, "\">", title, "</a>"]
 
--- | Makes the contents for the page of previews. 
 makeContents :: Q Exp
-makeContents = 
+makeContents = makeContentsWithOptions "templates/articles"
+
+-- | Makes the contents for the page of previews. 
+makeContentsWithOptions :: Text -> Q Exp
+makeContentsWithOptions path = 
     do 
-      articles <- runIO getArticleNames
-      titles <- runIO $ mapM (\x -> getTitle $ unpack x) articles
+      articles <- runIO $ getArticleNames path
+      titles <- runIO $ mapM getTitle articles
       let articles' = zip (map stripName articles) titles
       let entries = map makeContentsEntry articles'
       ham <- hamletFromString rules NP.defaultHamletSettings $ 
