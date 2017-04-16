@@ -1,7 +1,7 @@
 # Yesod.Articles
 
-This library provides three core funtions for automatically generating
-a homepage with articles, with seperate pages for each article.
+This library provides three core functions for automatically generating
+a homepage with articles, with separate pages for each article.
 
 `makeGets` and `makeGetsWithOptions` should be spliced in at/near the top 
 of the file where you will put the handler for your homepage. 
@@ -17,7 +17,7 @@ of the file where you will put the handler for your homepage.
     `[e|\x -> do defaultLayout $ x|]`, which is probably a good idea for you too.
 
 Because of the wonderful type-safety-ness of all of Yesod's links, it is impossible,
-or at least infeasable, to generate truly seperate pages for each article. 
+or at least infeasible, to generate truly separate pages for each article. 
 Instead the workaround that I use is to generate a `getArticleR` handler, which
 takes in an argument from the url, this is used to then defer to the appropriate
 handler function (ex: `getArticleR "foo"` will return the `getFooR` function).
